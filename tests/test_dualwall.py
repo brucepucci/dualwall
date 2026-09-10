@@ -3,6 +3,18 @@
 Covers the metadata builder, image loading (EXIF/ICC), dimension
 reconciliation, encoding + structural verification, interactive input paths,
 desktop application, and CLI behaviour (in-process and via subprocess).
+
+Coverage of the implementation plan's acceptance criteria:
+  A0 reference blob ....... test_apr_matches_reference_blob
+  A1 metadata round-trip .. test_written_apr_decodes_to_expected_dict, test_cli_end_to_end
+  A2 container shape ...... test_roundtrip_two_images_xmp_on_image0_only
+  A3 mismatch rejection ... test_main_mismatch_without_fit_fails_and_writes_no_file,
+                            test_cli_mismatch_exits_nonzero
+  A4 fit path ............. test_main_fit_succeeds_and_stores_light_dims
+  A5 lossless ............. test_main_lossless_flag
+  A6 non-Darwin guard ..... test_main_apply_off_darwin_skips_and_exits_zero
+  A7 photographic case .... test_cli_photographic_case_plan_a7
+  A8 cancellation ......... test_main_cancelled_picker_exits_cleanely
 """
 
 from __future__ import annotations
@@ -533,6 +545,13 @@ def test_parse_args_defaults():
     assert not (args.lossless or args.fit or args.apply)
 
 
+def test_version_flag(capsys):
+    with pytest.raises(SystemExit) as exc:
+        dualwall.parse_args(["--version"])
+    assert exc.value.code == 0
+    assert dualwall.__version__ in capsys.readouterr().out
+
+
 # ------------------------------------------------------- subprocess wiring --
 
 def test_cli_end_to_end(tmp_path):
@@ -554,3 +573,23 @@ def test_cli_mismatch_exits_nonzero(tmp_path):
     assert r.returncode != 0
     assert "--fit" in r.stderr
     assert not out.exists()
+
+
+def test_cli_photographic_case_plan_a7(tmp_path):
+    # Plan A7: a 2560x1440 photographic pair at -q 85 must produce a plausible
+    # file size (solid colours compress to near zero and would mask
+    # size-reporting bugs) and pass the A1/A2 structural checks.
+    size = (2560, 1440)
+    light, dark = tmp_path / "l7.jpg", tmp_path / "d7.jpg"
+    for path in (light, dark):
+        Image.frombytes(
+            "RGB", size, os.urandom(size[0] * size[1] * 3)
+        ).save(path, "JPEG", quality=95)
+    out = tmp_path / "a7.heic"
+    r = run_cli(str(light), str(dark), "-o", str(out), "-q", "85")
+    assert r.returncode == 0, r.stderr
+    assert out.stat().st_size > 200_000  # plausible, not collapsed
+    f = pillow_heif.open_heif(str(out))
+    assert len(f) == 2
+    assert [tuple(im.size) for im in f] == [size, size]
+    assert decode_plist(f[0].info["xmp"]) == {"l": 0, "d": 1}

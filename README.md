@@ -47,35 +47,16 @@ reopened and structurally verified (two images, matching dimensions, metadata
 present) before success is reported. On `--apply`, dualwall prints a warning
 about the "Show on all spaces" toggle — see Known limitations.
 
-## Acceptance
-
-`uv run python acceptance.py` generates fixtures (solid PNGs plus 2560×1440
-random-noise JPEGs) and exercises A1–A8 from the plan:
-
-```
-[PASS] A0 runtime apr == reference
-[PASS] A1 build pair exits 0
-[PASS] A1 decoded apr == {'l': 0, 'd': 1}
-[PASS] A2 two images, identical dims, apr on image 0 only — n=2, dims=[(60, 40), (60, 40)], apr0=True, apr1=False
-[PASS] A3 mismatch exits non-zero, names both sizes and --fit, writes no file
-[PASS] A4 --fit succeeds; stored dims == light dims exactly
-[PASS] A5 --lossless passes A1+A2
-[PASS] A6 --apply off Darwin: skip notice, exit 0, valid file
-[PASS] A7 2560x1440 noise pair at -q 85: plausible size, A1+A2 pass — size=9.16 MB
-[PASS] A8 cancelled picker exits 0 without traceback
-
-10/10 checks passed
-```
-
-A8 simulates picker cancellation (osascript non-zero exit); the remaining
-Darwin-only paths — real pickers, `--apply` — need a GUI session.
-
 ## Tests
 
 ```sh
-uv run pytest tests/ -v        # 45 tests
-uv run python acceptance.py    # A0–A8 from the plan
+uv run pytest tests/ -v    # 47 tests, covering the plan's A0–A8 acceptance criteria
 ```
+
+The acceptance-criteria mapping is documented in the test module docstring
+(A7 uses 2560×1440 random-noise JPEGs since solid colours compress to near
+zero and would mask size bugs; A8 simulates picker cancellation — real pickers
+and `--apply` need a GUI session).
 
 The suite drove out one real fix: the encoder's default 4:2:0 chroma
 subsampling was silently discarding chroma detail even under `quality=-1`
@@ -105,3 +86,7 @@ rounding from the RGB↔YCbCr conversion.
 - Acceptance checks are structural; final validation is opening the file in
   System Settings → Wallpaper and confirming a Light/Dark control appears
   rather than "Still".
+
+## License
+
+MIT — see [LICENSE](LICENSE).

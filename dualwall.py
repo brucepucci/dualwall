@@ -71,6 +71,7 @@ pillow_heif.register_heif_opener()
 
 IS_DARWIN = sys.platform == "darwin"
 DEFAULT_QUALITY = 90
+__version__ = "0.1.0"  # keep in sync with pyproject.toml
 
 
 class Cancelled(Exception):
@@ -283,6 +284,9 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
             "Combine light- and dark-mode images into one macOS "
             "appearance-aware dynamic wallpaper (.heic)."
         ),
+    )
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {__version__}"
     )
     parser.add_argument(
         "light", nargs="?", help="light-mode image path (default: file picker)"
