@@ -93,9 +93,15 @@ rounding from the RGB↔YCbCr conversion.
 
 ## Known limitations
 
-- `--apply` on macOS 26 turns off "Show on all spaces" after the first
-  programmatic set; subsequent updates land only on the active Space. Open
-  Apple defect, no workaround — install via System Settings instead.
+- `--apply` on macOS 26 can turn off "Show on all spaces" (open Apple defect;
+  no supported programmatic toggle exists). After setting the picture, dualwall
+  verifies WallpaperAgent's store
+  (`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`):
+  the toggle is on when `AllSpacesAndDisplays.Type == 'individual'` with no
+  per-Space/per-display overrides. If verification fails, dualwall attempts a
+  repair — promoting the wallpaper's config to the shared slot, dropping
+  overrides, and reloading WallpaperAgent — and says so either way.
+  Installing through System Settings avoids the issue entirely.
 - macOS caches wallpapers by path (Sonoma+): overwriting in place at an
   already-used path does not trigger a redraw. Write to a fresh filename.
 - Acceptance checks are structural; final validation is opening the file in

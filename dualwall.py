@@ -27,11 +27,15 @@ published copies circulate corrupted (one has a placeholder spliced in, another
 inverts the indices), so no literal is hardcoded here.
 
 Known limitations:
-  * --apply on macOS 26 (Tahoe) turns off "Show on all spaces" after the first
-    programmatic set; subsequent updates then land only on the active Space.
-    This is an open Apple defect; desktoppicture.db manipulation and killall
-    Dock signal variants do not help. Installing through System Settings avoids
-    the path entirely. No workaround is attempted.
+  * --apply on macOS 26 (Tahoe) can turn off "Show on all spaces" after a
+    programmatic set (an open Apple defect; desktoppicture.db manipulation and
+    killall Dock signal variants do not help). After setting the picture,
+    dualwall therefore verifies WallpaperAgent's store
+    (~/Library/Application Support/com.apple.wallpaper/Store/Index.plist) and,
+    if per-Space overrides displaced the shared config, attempts a repair:
+    promote the wallpaper to the shared slot, drop overrides, and reload
+    WallpaperAgent. Installing through System Settings avoids the issue
+    entirely.
   * macOS caches wallpapers by path (Sonoma and later): overwriting a file in
     place at an already-used path does not trigger a redraw. Write to a fresh
     filename instead.
@@ -52,8 +56,10 @@ import base64
 import plistlib
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Optional
+from urllib.parse import unquote
 
 try:
     from PIL import Image, ImageOps
@@ -70,6 +76,14 @@ pillow_heif.register_heif_opener()
 
 IS_DARWIN = sys.platform == "darwin"
 DEFAULT_QUALITY = 90
+# WallpaperAgent's store (macOS Sonoma and later). "Show on all spaces" is
+# active when AllSpacesAndDisplays.Type == 'individual' with no per-Space/
+# per-display overrides; when it is off, per-Space entries appear instead and
+# the shared slot goes idle.
+WALLPAPER_STORE = (
+    Path.home()
+    / "Library/Application Support/com.apple.wallpaper/Store/Index.plist"
+)
 
 
 class Cancelled(Exception):
@@ -261,6 +275,84 @@ def set_desktop_picture(path: Path) -> None:
         ) from exc
 
 
+def _read_wallpaper_store() -> Optional[dict]:
+    try:
+        return plistlib.loads(WALLPAPER_STORE.read_bytes())
+    except (OSError, plistlib.InvalidFileException):
+        return None
+
+
+def _desktop_config_url(desktop: object) -> Optional[str]:
+    """Extract the image file URL from a store Desktop slot, if any."""
+    if not isinstance(desktop, dict):
+        return None
+    try:
+        cfg = plistlib.loads(desktop["Content"]["Choices"][0]["Configuration"])
+        return str(cfg.get("url", {}).get("relative", "")) or None
+    except (KeyError, IndexError, ValueError):
+        return None
+
+
+def verify_all_spaces(out_path: Path) -> tuple[bool, str]:
+    """Check WallpaperAgent's store: is 'Show on all spaces' in effect with
+    our file as the shared desktop picture? (macOS Sonoma and later.)"""
+    if not WALLPAPER_STORE.exists():
+        return False, "wallpaper store not found on this system version"
+    store = _read_wallpaper_store()
+    if store is None:
+        return False, "wallpaper store unreadable"
+    shared = store.get("AllSpacesAndDisplays", {})
+    if shared.get("Type") != "individual":
+        return False, (
+            f"shared configuration is {shared.get('Type')!r}, not 'individual' "
+            "(per-Space wallpapers are active)"
+        )
+    if store.get("Spaces") or store.get("Displays"):
+        return False, "per-Space/per-display overrides present"
+    url = _desktop_config_url(shared.get("Desktop"))
+    want = out_path.resolve().as_uri()
+    if not url or unquote(url) != unquote(want):
+        return False, f"shared configuration points at {url!r}, not {want!r}"
+    return True, "shared configuration covers all Spaces"
+
+
+def repair_all_spaces(out_path: Path) -> bool:
+    """Best-effort repair of 'Show on all spaces': promote our wallpaper's
+    config to the shared AllSpacesAndDisplays slot, drop per-Space overrides,
+    and reload WallpaperAgent. Only called right after --apply set the picture
+    (so clobbering per-Space choices matches the user's request to put this
+    wallpaper everywhere)."""
+    store = _read_wallpaper_store()
+    if store is None:
+        return False
+    want = unquote(out_path.resolve().as_uri())
+    shared = store.get("AllSpacesAndDisplays", {})
+    candidates = [shared.get("Desktop"), store.get("SystemDefault", {}).get("Desktop")]
+    for group in ("Spaces", "Displays"):
+        for entry in (store.get(group) or {}).values():
+            if isinstance(entry, dict):
+                candidates.append(entry.get("Desktop"))
+    target = next(
+        (c for c in candidates if c and unquote(_desktop_config_url(c) or "") == want),
+        None,
+    )
+    if target is None:
+        return False
+    shared["Type"] = "individual"
+    shared["Desktop"] = target
+    store["AllSpacesAndDisplays"] = shared
+    store["Spaces"] = {}
+    store["Displays"] = {}
+    try:
+        WALLPAPER_STORE.write_bytes(plistlib.dumps(store, fmt=plistlib.FMT_BINARY))
+    except OSError:
+        return False
+    # WallpaperAgent is a launchd agent; it reloads the store on relaunch.
+    subprocess.run(["killall", "WallpaperAgent"], capture_output=True)
+    time.sleep(1.5)
+    return verify_all_spaces(out_path)[0]
+
+
 # ----------------------------------------------------------------------- CLI --
 
 def resolve_output(output: Optional[str], light_path: Path) -> Path:
@@ -378,6 +470,27 @@ def main(argv: Optional[list[str]] = None) -> int:
                 set_desktop_picture(out_path)
                 applied = True
                 print(f"desktop picture set to {out_path}")
+                spaces_ok, detail = verify_all_spaces(out_path)
+                if spaces_ok:
+                    print(
+                        "confirmed: 'Show on all spaces' is on — every Space "
+                        "shows this wallpaper"
+                    )
+                else:
+                    print(
+                        "note: could not confirm 'Show on all spaces' "
+                        f"({detail}); attempting repair"
+                    )
+                    if repair_all_spaces(out_path):
+                        print(
+                            "repaired: wallpaper store rewritten and "
+                            "WallpaperAgent reloaded"
+                        )
+                    else:
+                        print(
+                            "repair failed — re-enable 'Show on all spaces' "
+                            "in System Settings → Wallpaper"
+                        )
             except DualwallError as exc:
                 apply_failed = True
                 print(f"error: {exc}", file=sys.stderr)
