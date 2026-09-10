@@ -17,7 +17,7 @@ uv run dualwall.py                        # or omit paths to use file pickers
 |---|---|---|---|
 | `light`, `dark` | positional, optional | picker | Light/dark-mode image paths |
 | `-o`, `--output` | path | `~/Pictures/Wallpapers/<stem>-dual.heic` | Output path |
-| `--lossless` | flag | off | Lossless encoding |
+| `--lossless` | flag | off | Lossless encoding (4:4:4 chroma) |
 | `-q`, `--quality` | int 0–100 | 90 | Lossy quality |
 | `--fit` | flag | off | Centre-crop dark image to match |
 | `--apply` | flag | off | Set as desktop picture (macOS only) |
@@ -44,7 +44,8 @@ HEIF container
 The base64 plist is derived at runtime from `plistlib` — published copies of
 the blob circulate corrupted, so no literal is embedded. Every written file is
 reopened and structurally verified (two images, matching dimensions, metadata
-present) before success is reported.
+present) before success is reported. On `--apply`, the "Show on all spaces"
+state is verified (and repaired if needed) — see Known limitations.
 
 ## Acceptance
 
@@ -72,7 +73,7 @@ Darwin-only paths — real pickers, `--apply` — need a GUI session.
 ## Tests
 
 ```sh
-uv run pytest tests/ -v        # 45 tests
+uv run pytest tests/ -v        # 53 tests
 uv run python acceptance.py    # A0–A8 from the plan
 ```
 
