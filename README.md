@@ -44,8 +44,8 @@ HEIF container
 The base64 plist is derived at runtime from `plistlib` — published copies of
 the blob circulate corrupted, so no literal is embedded. Every written file is
 reopened and structurally verified (two images, matching dimensions, metadata
-present) before success is reported. On `--apply`, the "Show on all spaces"
-state is verified (and repaired if needed) — see Known limitations.
+present) before success is reported. On `--apply`, dualwall prints a warning
+about the "Show on all spaces" toggle — see Known limitations.
 
 ## Acceptance
 
@@ -73,7 +73,7 @@ Darwin-only paths — real pickers, `--apply` — need a GUI session.
 ## Tests
 
 ```sh
-uv run pytest tests/ -v        # 53 tests
+uv run pytest tests/ -v        # 45 tests
 uv run python acceptance.py    # A0–A8 from the plan
 ```
 
@@ -94,15 +94,12 @@ rounding from the RGB↔YCbCr conversion.
 
 ## Known limitations
 
-- `--apply` on macOS 26 can turn off "Show on all spaces" (open Apple defect;
-  no supported programmatic toggle exists). After setting the picture, dualwall
-  verifies WallpaperAgent's store
-  (`~/Library/Application Support/com.apple.wallpaper/Store/Index.plist`):
-  the toggle is on when `AllSpacesAndDisplays.Type == 'individual'` with no
-  per-Space/per-display overrides. If verification fails, dualwall attempts a
-  repair — promoting the wallpaper's config to the shared slot, dropping
-  overrides, and reloading WallpaperAgent — and says so either way.
-  Installing through System Settings avoids the issue entirely.
+- `--apply` on macOS 26 can turn off "Show on all spaces" (open Apple defect,
+  no workaround: WallpaperAgent's store plist is a projection of the toggle,
+  not its source of truth, so rewriting it changes nothing). After applying,
+  dualwall prints a warning on stdout — re-check the toggle under
+  System Settings → Wallpaper, or install the file via
+  System Settings → Wallpaper → Add Photo to avoid the path entirely.
 - macOS caches wallpapers by path (Sonoma+): overwriting in place at an
   already-used path does not trigger a redraw. Write to a fresh filename.
 - Acceptance checks are structural; final validation is opening the file in

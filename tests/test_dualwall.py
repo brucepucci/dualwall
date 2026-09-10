@@ -355,133 +355,6 @@ def test_set_desktop_picture_failure_mentions_permission(monkeypatch):
         dualwall.set_desktop_picture(Path("/tmp/x.heic"))
 
 
-# ---------------------------------------------- "Show on all spaces" store --
-
-def write_store(path, shared_url, *, shared_type="individual", shared_desktop=True,
-                spaces=None, displays=None):
-    """Synthesize a WallpaperAgent Index.plist. spaces/displays map a slot key
-    to the URL that slot is configured with."""
-
-    def desktop(url):
-        cfg = plistlib.dumps(
-            {"type": "imageFile", "url": {"relative": url}},
-            fmt=plistlib.FMT_BINARY,
-        )
-        return {
-            "Content": {
-                "Choices": [
-                    {
-                        "Provider": "com.apple.wallpaper.choice.image",
-                        "Configuration": cfg,
-                        "Files": [],
-                    }
-                ],
-                "Shuffle": "$null",
-            },
-            "LastSet": 0,
-            "LastUse": 0,
-        }
-
-    shared = {"Type": shared_type, "Idle": {}}
-    if shared_desktop:
-        shared["Desktop"] = desktop(shared_url)
-    store = {
-        "AllSpacesAndDisplays": shared,
-        "SystemDefault": {
-            "Type": "individual",
-            "Desktop": desktop(shared_url),
-            "Idle": {},
-        },
-        "Spaces": {k: {"Desktop": desktop(u)} for k, u in (spaces or {}).items()},
-        "Displays": {k: {"Desktop": desktop(u)} for k, u in (displays or {}).items()},
-    }
-    path.write_bytes(plistlib.dumps(store, fmt=plistlib.FMT_BINARY))
-
-
-@pytest.fixture
-def store_path(tmp_path, monkeypatch):
-    path = tmp_path / "Index.plist"
-    monkeypatch.setattr(dualwall, "WALLPAPER_STORE", path)
-    return path
-
-
-def test_verify_all_spaces_ok(store_path, tmp_path):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    write_store(store_path, out.resolve().as_uri())
-    ok, detail = dualwall.verify_all_spaces(out)
-    assert ok, detail
-
-
-def test_verify_all_spaces_missing_store(tmp_path, monkeypatch):
-    monkeypatch.setattr(dualwall, "WALLPAPER_STORE", tmp_path / "nope.plist")
-    ok, _ = dualwall.verify_all_spaces(tmp_path / "w.heic")
-    assert not ok
-
-
-def test_verify_all_spaces_rejects_per_space_overrides(store_path, tmp_path):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    write_store(
-        store_path, out.resolve().as_uri(), spaces={"s1": out.resolve().as_uri()}
-    )
-    ok, _ = dualwall.verify_all_spaces(out)
-    assert not ok
-
-
-def test_verify_all_spaces_rejects_idle_shared_slot(store_path, tmp_path):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    write_store(
-        store_path, out.resolve().as_uri(), shared_type="idle", shared_desktop=False
-    )
-    ok, _ = dualwall.verify_all_spaces(out)
-    assert not ok
-
-
-def test_verify_all_spaces_rejects_other_file(store_path, tmp_path):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    write_store(store_path, "file:///elsewhere.heic")
-    ok, _ = dualwall.verify_all_spaces(out)
-    assert not ok
-
-
-def test_repair_promotes_space_config_to_shared(store_path, tmp_path, monkeypatch):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    url = out.resolve().as_uri()
-    # Simulate the defect state: shared slot idle, our file in a Space slot.
-    write_store(
-        store_path,
-        "file:///old.heic",
-        shared_type="idle",
-        shared_desktop=False,
-        spaces={"19CE2756-1111": url},
-        displays={"F58C45E5-2222": "file:///other-display.heic"},
-    )
-    killed = []
-
-    def fake_run(cmd, **kwargs):
-        killed.append(cmd)
-        return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
-
-    monkeypatch.setattr(dualwall.subprocess, "run", fake_run)
-    monkeypatch.setattr(dualwall.time, "sleep", lambda s: None)
-
-    assert dualwall.repair_all_spaces(out)
-    assert any("killall" in c and "WallpaperAgent" in c for c in killed)
-    ok, _ = dualwall.verify_all_spaces(out)  # store now passes verification
-    assert ok
-
-
-def test_repair_fails_when_file_absent_from_store(store_path, tmp_path):
-    out = tmp_path / "w.heic"
-    out.write_bytes(b"")
-    write_store(store_path, "file:///unrelated.heic")
-    assert not dualwall.repair_all_spaces(out)
-
-
 def test_main_apply_off_darwin_skips_and_exits_zero(
     monkeypatch, tmp_path, solid, capsys
 ):
@@ -497,17 +370,14 @@ def test_main_apply_off_darwin_skips_and_exits_zero(
     assert len(pillow_heif.open_heif(str(out))) == 2
 
 
-def test_main_apply_on_darwin_success(monkeypatch, tmp_path, solid, capsys, store_path):
+def test_main_apply_on_darwin_success(monkeypatch, tmp_path, solid, capsys):
     monkeypatch.setattr(dualwall, "IS_DARWIN", True)
-    monkeypatch.setattr(dualwall.time, "sleep", lambda s: None)
     monkeypatch.setattr(
         dualwall.subprocess,
         "run",
         mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout="")),
     )
     out = tmp_path / "o.heic"
-    # Pre-seed the store so post-apply verification passes cleanly.
-    write_store(store_path, out.resolve().as_uri())
     rc = dualwall.main([
         str(solid("l.png", (30, 20), "white")),
         str(solid("d.png", (30, 20), "black")),
@@ -516,35 +386,10 @@ def test_main_apply_on_darwin_success(monkeypatch, tmp_path, solid, capsys, stor
     assert rc == 0
     out_text = capsys.readouterr().out
     assert "desktop picture set" in out_text
-    assert "confirmed: 'Show on all spaces'" in out_text
-    assert "Show on all spaces" in out_text  # macOS 26 defect note
-
-
-def test_main_apply_repairs_all_spaces(monkeypatch, tmp_path, solid, capsys, store_path):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", True)
-    monkeypatch.setattr(dualwall.time, "sleep", lambda s: None)
-    monkeypatch.setattr(
-        dualwall.subprocess,
-        "run",
-        mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout="")),
-    )
-    out = tmp_path / "o.heic"
-    write_store(
-        store_path,
-        "file:///old.heic",
-        shared_type="idle",
-        shared_desktop=False,
-        spaces={"s": out.resolve().as_uri()},
-    )
-    rc = dualwall.main([
-        str(solid("l.png", (30, 20), "white")),
-        str(solid("d.png", (30, 20), "black")),
-        "-o", str(out), "--apply",
-    ])
-    captured = capsys.readouterr()
-    assert rc == 0
-    assert "desktop picture set" in captured.out
-    assert "repaired" in captured.out
+    # The stdout warning must instruct the user what to check after applying.
+    assert 'warning: setting the wallpaper programmatically' in out_text
+    assert '"Show on all spaces"' in out_text
+    assert "System Settings → Wallpaper" in out_text
 
 
 def test_main_apply_failure_exits_one(monkeypatch, tmp_path, solid, capsys):
