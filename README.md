@@ -1,4 +1,4 @@
-# dualwall
+# wallwell
 
 Combine a light-mode image and a dark-mode image into a single macOS
 appearance-aware dynamic wallpaper (`.heic`). macOS swaps the displayed image
@@ -9,8 +9,8 @@ Apple's own Dynamic Desktop wallpapers use.
 
 ```sh
 uv sync                                   # set up the environment
-uv run dualwall.py LIGHT DARK [options]   # build the wallpaper
-uv run dualwall.py                        # or omit paths to use file pickers
+uv run wallwell.py LIGHT DARK [options]   # build the wallpaper
+uv run wallwell.py                        # or omit paths to use file pickers
 ```
 
 | Flag | Type | Default | Purpose |
@@ -44,7 +44,7 @@ HEIF container
 The base64 plist is derived at runtime from `plistlib` — published copies of
 the blob circulate corrupted, so no literal is embedded. Every written file is
 reopened and structurally verified (two images, matching dimensions, metadata
-present) before success is reported. On `--apply`, dualwall prints a warning
+present) before success is reported. On `--apply`, wallwell prints a warning
 about the "Show on all spaces" toggle — see Known limitations.
 
 ## Tests
@@ -78,7 +78,7 @@ rounding from the RGB↔YCbCr conversion.
 - `--apply` on macOS 26 can turn off "Show on all spaces" (open Apple defect,
   no workaround: WallpaperAgent's store plist is a projection of the toggle,
   not its source of truth, so rewriting it changes nothing). After applying,
-  dualwall prints a warning on stdout — re-check the toggle under
+  wallwell prints a warning on stdout — re-check the toggle under
   System Settings → Wallpaper, or install the file via
   System Settings → Wallpaper → Add Photo to avoid the path entirely.
 - macOS caches wallpapers by path (Sonoma+): overwriting in place at an

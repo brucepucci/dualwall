@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""dualwall — combine a light- and a dark-mode image into one macOS
+"""wallwell — combine a light- and a dark-mode image into one macOS
 appearance-aware dynamic wallpaper (.heic).
 
 Usage:
-    uv run dualwall.py LIGHT DARK [-o OUT.heic] [--lossless] [-q N] [--fit] [--apply]
+    uv run wallwell.py LIGHT DARK [-o OUT.heic] [--lossless] [-q N] [--fit] [--apply]
 
     Omit LIGHT/DARK to pick them interactively (native file pickers on macOS,
     typed paths elsewhere). macOS swaps the displayed image automatically when
@@ -30,7 +30,7 @@ Known limitations:
   * --apply on macOS 26 (Tahoe) can turn off "Show on all spaces" after a
     programmatic set. This is an open Apple defect with no workaround:
     WallpaperAgent's store plist is a projection of the toggle, not its source
-    of truth, so rewriting it changes nothing. After applying, dualwall prints
+    of truth, so rewriting it changes nothing. After applying, wallwell prints
     a warning — re-check the toggle under System Settings → Wallpaper.
     Installing through System Settings avoids the path entirely.
   * macOS caches wallpapers by path (Sonoma and later): overwriting a file in
@@ -78,11 +78,11 @@ class Cancelled(Exception):
     """The user cancelled an interactive prompt."""
 
 
-class DualwallError(Exception):
+class WallwellError(Exception):
     """A user-facing error."""
 
 
-class VerificationError(DualwallError):
+class VerificationError(WallwellError):
     """The written file failed structural verification."""
 
 
@@ -116,9 +116,9 @@ def load_image(path: Path) -> Image.Image:
     try:
         img = Image.open(path)
     except FileNotFoundError:
-        raise DualwallError(f"image not found: {path}") from None
+        raise WallwellError(f"image not found: {path}") from None
     except OSError as exc:
-        raise DualwallError(f"cannot open image {path}: {exc}") from None
+        raise WallwellError(f"cannot open image {path}: {exc}") from None
 
     # Capture the profile before any conversion — convert() drops it and
     # wide-gamut sources would be flattened to sRGB.
@@ -214,7 +214,7 @@ def encode_wallpaper(
             chroma=444 if lossless else 420,
         )
     except (OSError, ValueError) as exc:
-        raise DualwallError(f"failed to encode {out_path}: {exc}") from exc
+        raise WallwellError(f"failed to encode {out_path}: {exc}") from exc
 
 
 def verify_wallpaper(out_path: Path) -> None:
@@ -254,7 +254,7 @@ def set_desktop_picture(path: Path) -> None:
         )
     except subprocess.CalledProcessError as exc:
         detail = (exc.stderr or "").strip()
-        raise DualwallError(
+        raise WallwellError(
             "could not set the desktop picture"
             + (f": {detail}" if detail else "")
             + "\nAutomation permission may be required — grant it under "
@@ -279,7 +279,7 @@ def resolve_output(output: Optional[str], light_path: Path) -> Path:
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        prog="dualwall",
+        prog="wallwell",
         description=(
             "Combine light- and dark-mode images into one macOS "
             "appearance-aware dynamic wallpaper (.heic)."
@@ -345,7 +345,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             if not args.fit:
                 lw, lh = light.size
                 dw, dh = dark.size
-                raise DualwallError(
+                raise WallwellError(
                     f"image dimensions differ: light is {lw}x{lh}, dark is "
                     f"{dw}x{dh} — pass --fit to centre-crop the dark image "
                     "to the light image's size, or crop the images to match"
@@ -364,7 +364,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             light, dark, out_path, lossless=args.lossless, quality=args.quality
         )
         verify_wallpaper(out_path)
-    except DualwallError as exc:
+    except WallwellError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
@@ -391,7 +391,7 @@ def main(argv: Optional[list[str]] = None) -> int:
                     "System Settings → Wallpaper → Add Photo avoids this "
                     "entirely)"
                 )
-            except DualwallError as exc:
+            except WallwellError as exc:
                 apply_failed = True
                 print(f"error: {exc}", file=sys.stderr)
         else:

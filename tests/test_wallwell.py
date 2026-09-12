@@ -1,4 +1,4 @@
-"""Test suite for dualwall.py.
+"""Test suite for wallwell.py.
 
 Covers the metadata builder, image loading (EXIF/ICC), dimension
 reconciliation, encoding + structural verification, interactive input paths,
@@ -32,10 +32,10 @@ import pillow_heif
 import pytest
 from PIL import Image, ImageChops
 
-import dualwall
+import wallwell
 
 REF_APR = "YnBsaXN0MDDSAQIDBFFkUWwQARAACA0PERMAAAAAAAABAQAAAAAAAAAFAAAAAAAAAAAAAAAAAAAAFQ=="
-SCRIPT = Path(__file__).resolve().parent.parent / "dualwall.py"
+SCRIPT = Path(__file__).resolve().parent.parent / "wallwell.py"
 
 
 # ------------------------------------------------------------------ helpers --
@@ -73,9 +73,9 @@ def built_pair(tmp_path, solid):
     """A standard matched pair already built through encode_wallpaper."""
     light, dark = make_pair(tmp_path)
     out = tmp_path / "out.heic"
-    light_img = dualwall.load_image(light)
-    dark_img = dualwall.load_image(dark)
-    dualwall.encode_wallpaper(
+    light_img = wallwell.load_image(light)
+    dark_img = wallwell.load_image(dark)
+    wallwell.encode_wallpaper(
         light_img, dark_img, out, lossless=False, quality=90
     )
     return light, dark, out
@@ -91,20 +91,20 @@ def run_cli(*argv):
 
 def test_apr_matches_reference_blob():
     # Guards against the corrupted / index-inverted copies circulating online.
-    assert extract_apr(dualwall.build_appearance_xmp(0, 1)) == REF_APR
+    assert extract_apr(wallwell.build_appearance_xmp(0, 1)) == REF_APR
 
 
 def test_apr_indices_are_parameterised():
-    assert decode_plist(dualwall.build_appearance_xmp(2, 5)) == {"l": 2, "d": 5}
+    assert decode_plist(wallwell.build_appearance_xmp(2, 5)) == {"l": 2, "d": 5}
 
 
 def test_apr_plist_is_binary_format():
-    raw = base64.b64decode(extract_apr(dualwall.build_appearance_xmp(0, 1)))
+    raw = base64.b64decode(extract_apr(wallwell.build_appearance_xmp(0, 1)))
     assert raw.startswith(b"bplist00")
 
 
 def test_xmp_packet_structure():
-    xmp = dualwall.build_appearance_xmp(0, 1).decode("utf-8")
+    xmp = wallwell.build_appearance_xmp(0, 1).decode("utf-8")
     assert '<x:xmpmeta xmlns:x="adobe:ns:meta/">' in xmp
     assert "http://www.w3.org/1999/02/22-rdf-syntax-ns#" in xmp
     assert 'xmlns:apple_desktop="http://ns.apple.com/namespace/1.0/"' in xmp
@@ -115,7 +115,7 @@ def test_xmp_packet_structure():
 # ------------------------------------------------------------- load_image --
 
 def test_load_image_rgb_passthrough(solid, tmp_path):
-    img = dualwall.load_image(solid("a.png", (32, 16), (1, 2, 3)))
+    img = wallwell.load_image(solid("a.png", (32, 16), (1, 2, 3)))
     assert img.mode == "RGB" and img.size == (32, 16)
 
 
@@ -125,7 +125,7 @@ def test_load_image_applies_exif_transpose(tmp_path):
     exif = Image.Exif()
     exif[274] = 6  # orientation: rotated 90°
     img.save(path, exif=exif)
-    loaded = dualwall.load_image(path)
+    loaded = wallwell.load_image(path)
     assert loaded.size == (20, 40)
 
 
@@ -134,27 +134,27 @@ def test_load_image_preserves_icc_across_mode_conversion(tmp_path):
     img = Image.new("P", (10, 10))
     img.putpalette([1, 2, 3] * 256)
     img.save(path, icc_profile=b"fake-icc-bytes")
-    loaded = dualwall.load_image(path)
+    loaded = wallwell.load_image(path)
     assert loaded.mode == "RGB"
     assert loaded.info["icc_profile"] == b"fake-icc-bytes"
 
 
 def test_load_image_missing_file_raises(tmp_path):
-    with pytest.raises(dualwall.DualwallError, match="not found"):
-        dualwall.load_image(tmp_path / "nope.png")
+    with pytest.raises(wallwell.WallwellError, match="not found"):
+        wallwell.load_image(tmp_path / "nope.png")
 
 
 def test_load_image_corrupt_file_raises(tmp_path):
     path = tmp_path / "bad.png"
     path.write_bytes(b"this is not an image")
-    with pytest.raises(dualwall.DualwallError, match="cannot open"):
-        dualwall.load_image(path)
+    with pytest.raises(wallwell.WallwellError, match="cannot open"):
+        wallwell.load_image(path)
 
 
 def test_load_image_accepts_heic_input(tmp_path):
     src = tmp_path / "src.heic"
     Image.new("RGB", (20, 10), (9, 9, 9)).save(src)  # register_heif_opener active
-    loaded = dualwall.load_image(src)
+    loaded = wallwell.load_image(src)
     assert loaded.size == (20, 10)
 
 
@@ -163,14 +163,14 @@ def test_load_image_accepts_heic_input(tmp_path):
 def test_fit_matches_light_dims_exactly():
     light = Image.new("RGB", (100, 50), "white")
     dark = Image.new("RGB", (50, 100), "black")
-    fitted = dualwall._fit_to_light(dark, light.size)
+    fitted = wallwell._fit_to_light(dark, light.size)
     assert fitted.size == (100, 50)
 
 
 def test_fit_preserves_icc():
     dark = Image.new("RGB", (50, 100), "black")
     dark.info["icc_profile"] = b"prof"
-    fitted = dualwall._fit_to_light(dark, (100, 50))
+    fitted = wallwell._fit_to_light(dark, (100, 50))
     assert fitted.info["icc_profile"] == b"prof"
 
 
@@ -183,7 +183,7 @@ def test_fit_is_centre_crop_not_distortion():
     dark = Image.new("RGB", (100, 200))
     dark.paste(top, (0, 0))
     dark.paste(bottom, (0, 100))
-    fitted = dualwall._fit_to_light(dark, (100, 100))
+    fitted = wallwell._fit_to_light(dark, (100, 100))
     assert fitted.getpixel((5, 5)) == (255, 0, 0)
     assert fitted.getpixel((5, 95)) == (0, 0, 255)
 
@@ -191,20 +191,20 @@ def test_fit_is_centre_crop_not_distortion():
 # ------------------------------------------------------------ output paths --
 
 def test_default_output_path():
-    out = dualwall.resolve_output(None, Path("/somewhere/Aqua.jpg"))
+    out = wallwell.resolve_output(None, Path("/somewhere/Aqua.jpg"))
     assert out == Path.home() / "Pictures" / "Wallpapers" / "Aqua-dual.heic"
     assert not str(out).startswith("~")
 
 
 def test_output_flag_expands_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    out = dualwall.resolve_output("~/w/pair.heic", Path("x.jpg"))
+    out = wallwell.resolve_output("~/w/pair.heic", Path("x.jpg"))
     assert out == tmp_path / "w" / "pair.heic"
 
 
 def test_output_appends_heic_suffix(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    out = dualwall.resolve_output("~/pair", Path("x.jpg"))
+    out = wallwell.resolve_output("~/pair", Path("x.jpg"))
     assert out.name == "pair.heic"
 
 
@@ -226,7 +226,7 @@ def test_written_apr_decodes_to_expected_dict(built_pair):
 
 
 def test_verify_accepts_valid_file(built_pair):
-    dualwall.verify_wallpaper(built_pair[2])  # no exception
+    wallwell.verify_wallpaper(built_pair[2])  # no exception
 
 
 def test_verify_rejects_wrong_image_count(tmp_path):
@@ -234,8 +234,8 @@ def test_verify_rejects_wrong_image_count(tmp_path):
     h = pillow_heif.HeifFile()
     h.add_from_pillow(Image.new("RGB", (10, 10)))
     h.save(str(out))
-    with pytest.raises(dualwall.VerificationError, match="2 images"):
-        dualwall.verify_wallpaper(out)
+    with pytest.raises(wallwell.VerificationError, match="2 images"):
+        wallwell.verify_wallpaper(out)
 
 
 def test_verify_rejects_missing_xmp(tmp_path):
@@ -244,15 +244,15 @@ def test_verify_rejects_missing_xmp(tmp_path):
     h.add_from_pillow(Image.new("RGB", (10, 10)))
     h.add_from_pillow(Image.new("RGB", (10, 10)))
     h.save(str(out))
-    with pytest.raises(dualwall.VerificationError, match="apr"):
-        dualwall.verify_wallpaper(out)
+    with pytest.raises(wallwell.VerificationError, match="apr"):
+        wallwell.verify_wallpaper(out)
 
 
 def test_encode_creates_parent_dirs(tmp_path, solid):
     out = tmp_path / "deep" / "nested" / "dirs" / "out.heic"
-    dualwall.encode_wallpaper(
-        dualwall.load_image(solid("l.png", (10, 10), "white")),
-        dualwall.load_image(solid("d.png", (10, 10), "black")),
+    wallwell.encode_wallpaper(
+        wallwell.load_image(solid("l.png", (10, 10), "white")),
+        wallwell.load_image(solid("d.png", (10, 10), "black")),
         out,
         lossless=False,
         quality=90,
@@ -271,8 +271,8 @@ def test_lossless_is_near_exact_and_lossy_is_not(tmp_path):
     size = (128, 128)
     noise = Image.frombytes("RGB", size, os.urandom(size[0] * size[1] * 3))
     ll, q50 = tmp_path / "ll.heic", tmp_path / "q50.heic"
-    dualwall.encode_wallpaper(noise, noise, ll, lossless=True, quality=90)
-    dualwall.encode_wallpaper(noise, noise, q50, lossless=False, quality=50)
+    wallwell.encode_wallpaper(noise, noise, ll, lossless=True, quality=90)
+    wallwell.encode_wallpaper(noise, noise, q50, lossless=False, quality=50)
     f_ll = pillow_heif.open_heif(str(ll))[0].to_pillow()
     f_q50 = pillow_heif.open_heif(str(q50))[0].to_pillow()
     assert _max_channel_diff(f_ll, noise) <= 2
@@ -285,8 +285,8 @@ def test_lossy_compresses_smooth_content_more_than_lossless(tmp_path):
         for x in range(256):
             img.putpixel((x, y), (x, y, (x + y) // 2))
     lossy, lossless = tmp_path / "q.heic", tmp_path / "ll.heic"
-    dualwall.encode_wallpaper(img, img, lossy, lossless=False, quality=90)
-    dualwall.encode_wallpaper(img, img, lossless, lossless=True, quality=90)
+    wallwell.encode_wallpaper(img, img, lossy, lossless=False, quality=90)
+    wallwell.encode_wallpaper(img, img, lossless, lossless=True, quality=90)
     # On compressible content the lossy file must be clearly smaller.
     assert lossy.stat().st_size < lossless.stat().st_size
 
@@ -300,38 +300,38 @@ def test_choose_file_darwin_success(monkeypatch):
         recorded["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout="/tmp/pic 1.jpg\n")
 
-    monkeypatch.setattr(dualwall.subprocess, "run", fake_run)
-    assert dualwall.choose_file_darwin("prompt") == Path("/tmp/pic 1.jpg")
+    monkeypatch.setattr(wallwell.subprocess, "run", fake_run)
+    assert wallwell.choose_file_darwin("prompt") == Path("/tmp/pic 1.jpg")
     assert "choose file" in recorded["cmd"][2]
 
 
 def test_choose_file_darwin_cancel_raises_cancelled(monkeypatch):
     monkeypatch.setattr(
-        dualwall.subprocess,
+        wallwell.subprocess,
         "run",
         mock.Mock(
             side_effect=subprocess.CalledProcessError(1, "osascript")
         ),
     )
-    with pytest.raises(dualwall.Cancelled):
-        dualwall.choose_file_darwin("prompt")
+    with pytest.raises(wallwell.Cancelled):
+        wallwell.choose_file_darwin("prompt")
 
 
 def test_prompt_path_strips_quotes_and_expands_home(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr("builtins.input", lambda _: '  "~/pics/a b.jpg"  ')
-    assert dualwall.prompt_path("give") == tmp_path / "pics" / "a b.jpg"
+    assert wallwell.prompt_path("give") == tmp_path / "pics" / "a b.jpg"
 
 
 def test_prompt_path_empty_input_cancels(monkeypatch):
     monkeypatch.setattr("builtins.input", lambda _: '   ""  ')
-    with pytest.raises(dualwall.Cancelled):
-        dualwall.prompt_path("give")
+    with pytest.raises(wallwell.Cancelled):
+        wallwell.prompt_path("give")
 
 
 def test_collect_image_prefers_arg_with_expansion(monkeypatch, tmp_path):
     monkeypatch.setenv("HOME", str(tmp_path))
-    got = dualwall.collect_image("light", "~/imgs/l.jpg")
+    got = wallwell.collect_image("light", "~/imgs/l.jpg")
     assert got == tmp_path / "imgs" / "l.jpg"
 
 
@@ -344,9 +344,9 @@ def test_set_desktop_picture_builds_script(monkeypatch, tmp_path):
         recorded["cmd"] = cmd
         return subprocess.CompletedProcess(cmd, 0, stdout="")
 
-    monkeypatch.setattr(dualwall.subprocess, "run", fake_run)
+    monkeypatch.setattr(wallwell.subprocess, "run", fake_run)
     target = tmp_path / "my wall\"quote.heic"
-    dualwall.set_desktop_picture(target)
+    wallwell.set_desktop_picture(target)
     script = recorded["cmd"][2]
     assert 'tell application "System Events"' in script
     assert "set picture of every desktop" in script
@@ -355,7 +355,7 @@ def test_set_desktop_picture_builds_script(monkeypatch, tmp_path):
 
 def test_set_desktop_picture_failure_mentions_permission(monkeypatch):
     monkeypatch.setattr(
-        dualwall.subprocess,
+        wallwell.subprocess,
         "run",
         mock.Mock(
             side_effect=subprocess.CalledProcessError(
@@ -363,16 +363,16 @@ def test_set_desktop_picture_failure_mentions_permission(monkeypatch):
             )
         ),
     )
-    with pytest.raises(dualwall.DualwallError, match="Automation"):
-        dualwall.set_desktop_picture(Path("/tmp/x.heic"))
+    with pytest.raises(wallwell.WallwellError, match="Automation"):
+        wallwell.set_desktop_picture(Path("/tmp/x.heic"))
 
 
 def test_main_apply_off_darwin_skips_and_exits_zero(
     monkeypatch, tmp_path, solid, capsys
 ):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", False)
+    monkeypatch.setattr(wallwell, "IS_DARWIN", False)
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (30, 20), "white")),
         str(solid("d.png", (30, 20), "black")),
         "-o", str(out), "--apply",
@@ -383,14 +383,14 @@ def test_main_apply_off_darwin_skips_and_exits_zero(
 
 
 def test_main_apply_on_darwin_success(monkeypatch, tmp_path, solid, capsys):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", True)
+    monkeypatch.setattr(wallwell, "IS_DARWIN", True)
     monkeypatch.setattr(
-        dualwall.subprocess,
+        wallwell.subprocess,
         "run",
         mock.Mock(return_value=subprocess.CompletedProcess([], 0, stdout="")),
     )
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (30, 20), "white")),
         str(solid("d.png", (30, 20), "black")),
         "-o", str(out), "--apply",
@@ -405,16 +405,16 @@ def test_main_apply_on_darwin_success(monkeypatch, tmp_path, solid, capsys):
 
 
 def test_main_apply_failure_exits_one(monkeypatch, tmp_path, solid, capsys):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", True)
+    monkeypatch.setattr(wallwell, "IS_DARWIN", True)
     monkeypatch.setattr(
-        dualwall.subprocess,
+        wallwell.subprocess,
         "run",
         mock.Mock(
             side_effect=subprocess.CalledProcessError(1, "osascript", stderr="x")
         ),
     )
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (30, 20), "white")),
         str(solid("d.png", (30, 20), "black")),
         "-o", str(out), "--apply",
@@ -430,7 +430,7 @@ def test_main_apply_failure_exits_one(monkeypatch, tmp_path, solid, capsys):
 
 def test_main_happy_path_messages(tmp_path, solid, capsys):
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (40, 30), "white")),
         str(solid("d.png", (40, 30), "black")),
         "-o", str(out),
@@ -447,7 +447,7 @@ def test_main_mismatch_without_fit_fails_and_writes_no_file(
     tmp_path, solid, capsys
 ):
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (60, 40), "white")),
         str(solid("d.png", (40, 60), "black")),
         "-o", str(out),
@@ -460,7 +460,7 @@ def test_main_mismatch_without_fit_fails_and_writes_no_file(
 
 def test_main_fit_succeeds_and_stores_light_dims(tmp_path, solid, capsys):
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (60, 40), "white")),
         str(solid("d.png", (40, 60), "black")),
         "-o", str(out), "--fit",
@@ -472,24 +472,24 @@ def test_main_fit_succeeds_and_stores_light_dims(tmp_path, solid, capsys):
 
 def test_main_lossless_flag(tmp_path, solid, capsys):
     out = tmp_path / "o.heic"
-    rc = dualwall.main([
+    rc = wallwell.main([
         str(solid("l.png", (10, 10), "white")),
         str(solid("d.png", (10, 10), "black")),
         "-o", str(out), "--lossless",
     ])
     assert rc == 0
     assert "lossless" in capsys.readouterr().out
-    dualwall.verify_wallpaper(out)
+    wallwell.verify_wallpaper(out)
 
 
 def test_main_verification_failure_exits_one(
     monkeypatch, tmp_path, solid, capsys
 ):
     def boom(path):
-        raise dualwall.VerificationError("bad container")
+        raise wallwell.VerificationError("bad container")
 
-    monkeypatch.setattr(dualwall, "verify_wallpaper", boom)
-    rc = dualwall.main([
+    monkeypatch.setattr(wallwell, "verify_wallpaper", boom)
+    rc = wallwell.main([
         str(solid("l.png", (10, 10), "white")),
         str(solid("d.png", (10, 10), "black")),
         "-o", str(tmp_path / "o.heic"),
@@ -501,44 +501,44 @@ def test_main_verification_failure_exits_one(
 def test_main_existing_output_prints_cache_warning(
     monkeypatch, tmp_path, solid, capsys
 ):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", False)
+    monkeypatch.setattr(wallwell, "IS_DARWIN", False)
     out = tmp_path / "o.heic"
     args = [
         str(solid("l.png", (10, 10), "white")),
         str(solid("d.png", (10, 10), "black")),
         "-o", str(out),
     ]
-    assert dualwall.main(args) == 0
+    assert wallwell.main(args) == 0
     capsys.readouterr()
-    assert dualwall.main(args) == 0
+    assert wallwell.main(args) == 0
     assert "already exists" in capsys.readouterr().out
 
 
 def test_main_cancelled_picker_exits_cleanely(monkeypatch, capsys):
-    monkeypatch.setattr(dualwall, "IS_DARWIN", True)
+    monkeypatch.setattr(wallwell, "IS_DARWIN", True)
     monkeypatch.setattr(
-        dualwall.subprocess,
+        wallwell.subprocess,
         "run",
         mock.Mock(
             side_effect=subprocess.CalledProcessError(1, "osascript")
         ),
     )
-    rc = dualwall.main([])
+    rc = wallwell.main([])
     assert rc == 0
     assert "Cancelled" in capsys.readouterr().out
 
 
 def test_quality_bounds():
-    assert dualwall.parse_args(["l", "d", "-q", "0"]).quality == 0
-    assert dualwall.parse_args(["l", "d", "-q", "100"]).quality == 100
+    assert wallwell.parse_args(["l", "d", "-q", "0"]).quality == 0
+    assert wallwell.parse_args(["l", "d", "-q", "100"]).quality == 100
     with pytest.raises(SystemExit):
-        dualwall.parse_args(["l", "d", "-q", "101"])
+        wallwell.parse_args(["l", "d", "-q", "101"])
     with pytest.raises(SystemExit):
-        dualwall.parse_args(["l", "d", "-q", "-1"])
+        wallwell.parse_args(["l", "d", "-q", "-1"])
 
 
 def test_parse_args_defaults():
-    args = dualwall.parse_args([])
+    args = wallwell.parse_args([])
     assert args.light is None and args.dark is None
     assert args.output is None
     assert args.quality == 90
@@ -547,9 +547,9 @@ def test_parse_args_defaults():
 
 def test_version_flag(capsys):
     with pytest.raises(SystemExit) as exc:
-        dualwall.parse_args(["--version"])
+        wallwell.parse_args(["--version"])
     assert exc.value.code == 0
-    assert dualwall.__version__ in capsys.readouterr().out
+    assert wallwell.__version__ in capsys.readouterr().out
 
 
 # ------------------------------------------------------- subprocess wiring --
